@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coffee Shop Live Orders Dashboard</title>
+  <!-- Tailwind Play CDN for convenience -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Small helpers */
+    .card-shadow { box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <div class="max-w-7xl mx-auto p-4">
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+      <div>
+        <h1 class="text-2xl font-bold">☕ Coffee Shop — Live Orders</h1>
+        <p class="text-sm text-gray-600">Manager dashboard • single-file demo</p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-2 text-sm text-gray-700">
+          Auto-refresh:
+          <select id="refreshSelect" class="ml-1 p-1 border rounded bg-white text-sm">
+            <option value="0">Off</option>
+            <option value="5">5s</option>
+            <option value="10" selected>10s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+          </select>
+        </label>
+        <button id="addDemoBtn" class="bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700 text-sm">Add demo order</button>
+        <button id="bulkDemoBtn" class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 text-sm">Add 5 demo</button>
+      </div>
+    </header>
+
+    <!-- Summary bar -->
+    <section class="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+      <div class="p-4 bg-white rounded card-shadow">
+        <div class="text-xs text-gray-500">Total orders (today)</div>
+        <div id="totalOrders" class="text-2xl font-semibold">0</div>
+      </div>
+      <div class="p-4 bg-white rounded card-shadow">
+        <div class="text-xs text-gray-500">Pending</div>
+        <div id="pendingCount" class="text-2xl font-semibold">0</div>
+      </div>
+      <div class="p-4 bg-white rounded card-shadow">
+        <div class="text-xs text-gray-500">Ready</div>
+        <div id="readyCount" class="text-2xl font-semibold">0</div>
+      </div>
+      <div class="p-4 bg-white rounded card-shadow">
+        <div class="text-xs text-gray-500">Revenue (today)</div>
+        <div id="revenue" class="text-2xl font-semibold">$0.00</div>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <!-- Left: orders grid -->
+      <div class="lg:col-span-3">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Active Orders</h2>
+          <div class="text-sm text-gray-600">Click a card to expand actions</div>
+        </div>
+
+        <div id="ordersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+      </div>
+
+      <!-- Right: alerts + assistant -->
+      <aside class="space-y-4">
+        <div class="p-4 bg-white rounded card-shadow">
+          <h3 class="font-semibold mb-2">Alerts</h3>
+          <div id="alertsPanel" class="space-y-2 text-sm text-gray-700">
+            <div class="text-gray-500">No alerts</div>
+          </div>
+        </div>
+
+        <div class="p-4 bg-white rounded card-shadow">
+          <h3 class="font-semibold mb-2">Smart Assistant</h3>
+          <div id="assistantPanel" class="text-sm text-gray-700">No suggestions yet</div>
+        </div>
+
+        <div class="p-4 bg-white rounded card-shadow">
+          <h3 class="font-semibold mb-2">Controls</h3>
+          <div class="flex flex-col gap-2 text-sm">
+            <label class="flex items-center gap-2"><input id="showCancelled" type="checkbox" checked> Show cancelled</label>
+            <label class="flex items-center gap-2"><input id="simulateProgress" type="checkbox" checked> Simulate order progress</label>
+            <button id="clearAllBtn" class="mt-2 bg-red-600 text-white px-2 py-1 rounded text-sm">Clear all demo orders</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="mt-6 text-xs text-gray-500">Tip: Use the demo buttons to populate the dashboard quickly.</footer>
+  </div>
+
+  <template id="orderCardTemplate">
+    <div class="bg-white rounded p-3 card-shadow border" data-id="__ID__">
+      <div class="flex justify-between items-start gap-2">
+        <div>
+          <div class="font-semibold text-lg">__NAME__</div>
+          <div class="text-xs text-gray-500">__TIMESTAMP__ • __PAYMENT__</div>
+        </div>
+        <div class="text-sm font-medium px-2 py-1 rounded status-badge">__STATUS__</div>
+      </div>
+
+      <div class="mt-2 text-sm text-gray-700">__ITEMS__</div>
+
+      <div class="mt-3 flex items-center justify-between text-sm">
+        <div class="text-gray-600">Total: <span class="font-semibold price">$0.00</span></div>
+        <div class="flex items-center gap-2">
+          <button class="updateStatusBtn px-2 py-1 rounded text-xs border">Next</button>
+          <button class="cancelBtn px-2 py-1 rounded text-xs border text-red-600">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    // Utility helpers
+    const $$ = (s, ctx=document) => Array.from(ctx.querySelectorAll(s));
+    const $ = (s, ctx=document) => ctx.querySelector(s);
+
+    // Demo data
+    const DRINKS = [
+      {name: 'Espresso', price: 2.5}, {name: 'Americano', price: 3.0}, {name: 'Latte', price: 3.5}, {name: 'Cappuccino', price: 3.5}, {name:'Flat White', price:3.75}, {name:'Cold Brew', price:4.0}
+    ];
+    const PASTRIES = [
+      {name: 'Croissant', price: 2.25}, {name: 'Blueberry Muffin', price: 2.5}, {name: 'Banana Bread', price: 3.0}, {name: 'Scone', price: 2.0}
+    ];
+    const SNACKS = [
+      {name: 'Granola Bar', price: 1.75}, {name: 'Yogurt Cup', price: 2.0}, {name: 'Bagel', price: 2.0}
+    ];
+    const PAYMENT = ['Cash', 'Card', 'Mobile Pay'];
+
+    // Application state
+    let orders = []; // {id, name, items: [{name, price, qty}], status, payment, ts, cancelled:boolean}
+    let nextId = 1;
+
+    // Settings
+    let refreshInterval = parseInt($('#refreshSelect').value, 10) || 0;
+    let refreshTimer = null;
+
+    // DOM refs
+    const ordersGrid = $('#ordersGrid');
+    const template = $('#orderCardTemplate').innerHTML;
+    const totalOrdersEl = $('#totalOrders');
+    const pendingCountEl = $('#pendingCount');
+    const readyCountEl = $('#readyCount');
+    const revenueEl = $('#revenue');
+    const alertsPanel = $('#alertsPanel');
+    const assistantPanel = $('#assistantPanel');
+
+    // Helpers
+    function formatMoney(n){ return '$' + n.toFixed(2); }
+    function formatTime(ts){ const d = new Date(ts); return d.toLocaleTimeString(); }
+
+    function randomFrom(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+    function calcOrderTotal(order){
+      return order.items.reduce((s,it)=> s + it.price * (it.qty||1), 0);
+    }
+
+    function createDemoOrder() {
+      const isLargeGroup = Math.random() < 0.12; // 12% chance
+      const items = [];
+      const drinkCount = isLargeGroup ? 4 + Math.floor(Math.random()*6) : 1 + Math.floor(Math.random()*2);
+      for(let i=0;i<drinkCount;i++) items.push({...randomFrom(DRINKS), qty: 1});
+      // maybe a pastry
+      if(Math.random() < 0.6) items.push({...randomFrom(PASTRIES), qty: 1});
+      if(Math.random() < 0.25) items.push({...randomFrom(SNACKS), qty: 1});
+
+      const order = {
+        id: nextId++,
+        name: ['Alex','Sam','Jamie','Taylor','Jordan','Casey','Riley','Morgan'][Math.floor(Math.random()*8)],
+        items,
+        status: 'waiting',
+        payment: randomFrom(PAYMENT),
+        ts: Date.now(),
+        cancelled: false,
+        group: isLargeGroup
+      };
+      orders.unshift(order); // newest first
+      return order;
+    }
+
+    function renderOrders(){
+      ordersGrid.innerHTML = '';
+      const showCancelled = $('#showCancelled').checked;
+      const visible = orders.filter(o => showCancelled ? true : !o.cancelled);
+      visible.forEach(order => {
+        const itemsList = order.items.map(it => `${it.qty||1}× ${it.name}`).join(', ');
+        const tpl = template
+          .replace('__ID__', order.id)
+          .replace('__NAME__', order.name + (order.group ? ' (Group)' : ''))
+          .replace('__TIMESTAMP__', formatTime(order.ts))
+          .replace('__PAYMENT__', order.payment)
+          .replace('__STATUS__', order.cancelled ? 'cancelled' : order.status)
+          .replace('__ITEMS__', itemsList)
+          .replace('$0.00', formatMoney(calcOrderTotal(order)));
+        const wrap = document.createElement('div');
+        wrap.innerHTML = tpl;
+        const card = wrap.firstElementChild;
+        // status badge styling
+        const badge = card.querySelector('.status-badge');
+        badge.classList.remove('bg-yellow-100','text-yellow-800','bg-green-100','text-green-800','bg-gray-100','text-gray-600','bg-red-100','text-red-700');
+        if(order.cancelled){ badge.classList.add('bg-red-100','text-red-700'); }
+        else if(order.status === 'waiting'){ badge.classList.add('bg-yellow-100','text-yellow-800'); }
+        else if(order.status === 'in progress'){ badge.classList.add('bg-gray-100','text-gray-600'); }
+        else if(order.status === 'ready'){ badge.classList.add('bg-green-100','text-green-800'); }
+
+        // wire buttons
+        const nextBtn = card.querySelector('.updateStatusBtn');
+        const cancelBtn = card.querySelector('.cancelBtn');
+        nextBtn.addEventListener('click', ()=> advanceStatus(order.id));
+        cancelBtn.addEventListener('click', ()=> cancelOrder(order.id));
+
+        // clicking card toggles expanded detail
+        card.addEventListener('click', (e)=>{
+          if(e.target.closest('button')) return; // avoid when clicking buttons
+          card.classList.toggle('ring-2');
+          card.classList.toggle('ring-indigo-300');
+        });
+
+        ordersGrid.appendChild(card);
+      });
+
+      updateSummary();
+      updateAlertsAndAssistant();
+    }
+
+    function updateSummary(){
+      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+      const todayOrders = orders.filter(o => o.ts >= todayStart.getTime() && !o.cancelled);
+      const total = todayOrders.length + orders.filter(o=>o.ts>=todayStart.getTime() && o.cancelled).length;
+      const pending = todayOrders.filter(o => o.status !== 'ready').length;
+      const ready = todayOrders.filter(o => o.status === 'ready').length;
+      const revenue = todayOrders.filter(o => o.status === 'ready' || o.payment === 'Cash' || o.payment === 'Card' || o.payment === 'Mobile Pay')
+        .reduce((s,o)=> s + calcOrderTotal(o), 0);
+      totalOrdersEl.textContent = total;
+      pendingCountEl.textContent = pending;
+      readyCountEl.textContent = ready;
+      revenueEl.textContent = formatMoney(revenue);
+    }
+
+    function advanceStatus(id){
+      const o = orders.find(x=>x.id===id); if(!o || o.cancelled) return;
+      if(o.status === 'waiting') o.status = 'in progress';
+      else if(o.status === 'in progress') o.status = 'ready';
+      else if(o.status === 'ready') { /* already ready */ }
+      renderOrders();
+    }
+
+    function cancelOrder(id){
+      const o = orders.find(x=>x.id===id); if(!o) return;
+      o.cancelled = true;
+      o.status = 'cancelled';
+      renderOrders();
+    }
+
+    function clearDemos(){
+      orders = [];
+      nextId = 1;
+      renderOrders();
+    }
+
+    // Auto-refresh / simulation
+    function setAutoRefresh(seconds){
+      if(refreshTimer) clearInterval(refreshTimer);
+      if(!seconds || seconds <= 0) { refreshTimer = null; return; }
+      refreshTimer = setInterval(()=>{
+        if($('#simulateProgress').checked) simulateProgressStep();
+        renderOrders();
+      }, seconds*1000);
+    }
+
+    function simulateProgressStep(){
+      // Simulate: increment some waiting to in progress, and some in progress to ready
+      // older orders more likely to progress
+      const candidatesWaiting = orders.filter(o=> o.status === 'waiting' && !o.cancelled);
+      const candidatesInProgress = orders.filter(o=> o.status === 'in progress' && !o.cancelled);
+      // promote some waiting to in progress
+      if(candidatesWaiting.length){
+        const pick = candidatesWaiting[Math.floor(Math.random()*candidatesWaiting.length)];
+        // 35% chance
+        if(Math.random() < 0.35) pick.status = 'in progress';
+      }
+      if(candidatesInProgress.length){
+        const pick2 = candidatesInProgress[Math.floor(Math.random()*candidatesInProgress.length)];
+        if(Math.random() < 0.4) pick2.status = 'ready';
+      }
+
+      // aging: waiting > certain time may escalate alerts
+    }
+
+    // Alerts and Smart Assistant
+    function updateAlertsAndAssistant(){
+      const now = Date.now();
+      const longWaiting = orders.filter(o=> !o.cancelled && o.status === 'waiting' && (now - o.ts) > 10*60*1000);
+      const largeGroups = orders.filter(o=> !o.cancelled && o.group && o.status !== 'ready');
+      const cancelled = orders.filter(o=> o.cancelled);
+
+      const alerts = [];
+      if(longWaiting.length) alerts.push(`${longWaiting.length} order(s) > 10 min waiting`);
+      if(largeGroups.length) alerts.push(`${largeGroups.length} large group order(s) in queue`);
+      if(cancelled.length) alerts.push(`${cancelled.length} cancelled order(s)`);
+
+      if(alerts.length === 0){ alertsPanel.innerHTML = '<div class="text-green-600">No alerts</div>'; }
+      else {
+        alertsPanel.innerHTML = alerts.map(a=> `<div class="p-2 bg-yellow-50 rounded border">${a}</div>`).join('');
+      }
+
+      // Smart assistant suggestions
+      const suggestions = [];
+      // Suggest prepping items that appear frequently in queue (count items across waiting/in progress)
+      const itemCounts = {};
+      orders.filter(o=> !o.cancelled && o.status !== 'ready').forEach(o=>{
+        o.items.forEach(it=>{ itemCounts[it.name] = (itemCounts[it.name]||0) + (it.qty||1); })
+      });
+      // find top item with count >=3
+      const entries = Object.entries(itemCounts).sort((a,b)=>b[1]-a[1]);
+      if(entries.length && entries[0][1] >= 3){ suggestions.push(`Consider prepping more ${entries[0][0]} — ${entries[0][1]} orders in queue`); }
+      if(largeGroups.length >= 2) suggestions.push(`Multiple group orders (${largeGroups.length}) — allocate extra staff for batching`);
+      if(longWaiting.length >= 1) suggestions.push(`Long waiting orders detected — consider reprioritizing`);
+      if(suggestions.length === 0) assistantPanel.textContent = 'No suggestions right now.';
+      else assistantPanel.innerHTML = suggestions.map(s=>`<div class="p-2 text-sm">• ${s}</div>`).join('');
+    }
+
+    // Events
+    $('#addDemoBtn').addEventListener('click', ()=>{ createDemoOrder(); renderOrders(); });
+    $('#bulkDemoBtn').addEventListener('click', ()=>{ for(let i=0;i<5;i++) createDemoOrder(); renderOrders(); });
+    $('#clearAllBtn').addEventListener('click', ()=>{ clearDemos(); });
+    $('#refreshSelect').addEventListener('change', (e)=>{ refreshInterval = parseInt(e.target.value,10) || 0; setAutoRefresh(refreshInterval); });
+
+    // Initial seeding
+    for(let i=0;i<3;i++) createDemoOrder();
+    renderOrders();
+    setAutoRefresh(refreshInterval);
+
+    // Periodic UI tick to update time-based alerts and summary without changing status
+    setInterval(()=>{ renderOrders(); }, 5000);
+
+    // Expose a small API on window for testing in console
+    window._coffeesim = { orders, createDemoOrder, renderOrders, clearDemos };
+  </script>
+</body>
+</html>
